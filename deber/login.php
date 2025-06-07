@@ -1,14 +1,11 @@
 <?php
-$servidor = "127.0.0.1";
-$usuario = "usuarioweb";
-$contrasena = "web123";
-$basedatos = "deber";
+try {
+    $conn = new PDO("pgsql:host=127.0.0.1;port=5432;dbname=deber", "usuarioweb", "web123");
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("Error de conexión: " . $e->getMessage());
+}
 
-$conn = new mysqli($servidor, $usuario, $contrasena, $basedatos);
-
-if ($conn->connect_error) {
-    die("Conexión fallida: " . $conn->connect_error);
-} 
 ?>
 
 <html lang="es">

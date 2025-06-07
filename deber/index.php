@@ -1,232 +1,236 @@
 <?php
-$servidor = "127.0.0.1";
-$usuario = "usuarioweb";
-$contrasena = "web123";
-$basedatos = "deber";
+try {
+    $conn = new PDO("pgsql:host=127.0.0.1;port=5432;dbname=deber", "usuarioweb", "web123");
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("Error de conexión: " . $e->getMessage());
+}
 
-$conn = new mysqli($servidor, $usuario, $contrasena, $basedatos);
-
-if ($conn->connect_error) {
-    die("Conexión fallida: " . $conn->connect_error);
-} 
 // Agregar después de la línea 10 (después de la conexión a la base de datos)
 
 // Función para registrar en bitácora
 function registrarEnBitacora($conn, $usuario, $accion, $tabla, $registroId, $detalles, $datosAnteriores = null, $datosNuevos = null) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+
+    $sql = "INSERT INTO bitacora 
+            (usuario, accion, tabla_afectada, registro_id, detalles, ip_usuario, datos_anteriores, datos_nuevos) 
+            VALUES (:usuario, :accion, :tabla, :registroId, :detalles, :ip, :datosAnteriores, :datosNuevos)";
     
-    $stmt = $conn->prepare("INSERT INTO bitacora (usuario, accion, tabla_afectada, registro_id, detalles, ip_usuario, datos_anteriores, datos_nuevos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    
+    $stmt = $conn->prepare($sql);
+
     $datosAnterioresJson = $datosAnteriores ? json_encode($datosAnteriores) : null;
     $datosNuevosJson = $datosNuevos ? json_encode($datosNuevos) : null;
-    
-    $stmt->bind_param("ssssssss", $usuario, $accion, $tabla, $registroId, $detalles, $ip, $datosAnterioresJson, $datosNuevosJson);
-    $stmt->execute();
-    $stmt->close();
+
+    $stmt->execute([
+        ':usuario' => $usuario,
+        ':accion' => $accion,
+        ':tabla' => $tabla,
+        ':registroId' => $registroId,
+        ':detalles' => $detalles,
+        ':ip' => $ip,
+        ':datosAnteriores' => $datosAnterioresJson,
+        ':datosNuevos' => $datosNuevosJson
+    ]);
 }
+
 
 // API para eliminar registro (REEMPLAZA tu código actual)
 if (isset($_GET['api']) && $_GET['api'] == 'delete' && isset($_GET['table']) && isset($_GET['id'])) {
     header('Content-Type: application/json');
-    
+
     $tableName = $_GET['table'];
     $recordId = $_GET['id'];
     $idField = isset($_GET['field']) ? $_GET['field'] : 'id';
-    $usuario = 'usuarioweb'; // Cambiar por el usuario actual si tienes sesiones
-    
-    // Validar nombre de tabla
-    if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName)) {
-        echo json_encode(['error' => 'Nombre de tabla inválido']);
+    $usuario = 'usuarioweb'; // Cambiar por el usuario actual si usas sesiones
+
+    // Validar nombre de tabla y campo (evita SQL Injection)
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName) || !preg_match('/^[a-zA-Z0-9_]+$/', $idField)) {
+        echo json_encode(['error' => 'Nombre de tabla o campo inválido']);
         exit;
     }
-    
+
     try {
-        // Obtener datos antes de eliminar para la bitácora
-        $selectStmt = $conn->prepare("SELECT * FROM `$tableName` WHERE `$idField` = ?");
-        $selectStmt->bind_param("s", $recordId);
-        $selectStmt->execute();
-        $result = $selectStmt->get_result();
-        $datosAnteriores = $result->fetch_assoc();
-        $selectStmt->close();
+        // Obtener datos antes de eliminar
+        $selectStmt = $conn->prepare("SELECT * FROM $tableName WHERE $idField = :id");
+        $selectStmt->execute([':id' => $recordId]);
+        $datosAnteriores = $selectStmt->fetch(PDO::FETCH_ASSOC);
         
         if (!$datosAnteriores) {
             echo json_encode(['error' => 'No se encontró el registro a eliminar']);
             exit;
         }
-        
+
         // Eliminar registro
-        $deleteStmt = $conn->prepare("DELETE FROM `$tableName` WHERE `$idField` = ?");
-        $deleteStmt->bind_param("s", $recordId);
-        
-        if ($deleteStmt->execute()) {
-            if ($deleteStmt->affected_rows > 0) {
-                // Registrar en bitácora
-                registrarEnBitacora(
-                    $conn, 
-                    $usuario, 
-                    'ELIMINAR', 
-                    $tableName, 
-                    $recordId, 
-                    "Registro eliminado de la tabla $tableName",
-                    $datosAnteriores,
-                    null
-                );
-                
-                echo json_encode(['success' => 'Registro eliminado correctamente']);
-            } else {
-                echo json_encode(['error' => 'No se encontró el registro a eliminar']);
-            }
+        $deleteStmt = $conn->prepare("DELETE FROM $tableName WHERE $idField = :id");
+        $deleteStmt->execute([':id' => $recordId]);
+
+        if ($deleteStmt->rowCount() > 0) {
+            // Registrar en bitácora
+            registrarEnBitacora(
+                $conn, 
+                $usuario, 
+                'ELIMINAR', 
+                $tableName, 
+                $recordId, 
+                "Registro eliminado de la tabla $tableName",
+                $datosAnteriores,
+                null
+            );
+            echo json_encode(['success' => 'Registro eliminado correctamente']);
         } else {
-            echo json_encode(['error' => 'Error al eliminar el registro']);
+            echo json_encode(['error' => 'No se encontró el registro a eliminar']);
         }
-        
-        $deleteStmt->close();
-        
+
     } catch (Exception $e) {
         echo json_encode(['error' => 'Error: ' . $e->getMessage()]);
     }
-    
-    $conn->close();
+
     exit;
 }
+
 
 // API para actualizar registro (REEMPLAZA tu código actual)
 if (isset($_POST['api']) && $_POST['api'] == 'update' && isset($_POST['table']) && isset($_POST['id'])) {
     header('Content-Type: application/json');
-    
+
     $tableName = $_POST['table'];
     $recordId = $_POST['id'];
     $idField = isset($_POST['field']) ? $_POST['field'] : 'id';
-    $usuario = 'usuarioweb'; // Cambiar por el usuario actual si tienes sesiones
-    
-    // Validar nombre de tabla
-    if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName)) {
-        echo json_encode(['error' => 'Nombre de tabla inválido']);
+    $usuario = 'usuarioweb'; // Cambiar por sesión si usas autenticación
+
+    // Validar tabla y campo
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName) || !preg_match('/^[a-zA-Z0-9_]+$/', $idField)) {
+        echo json_encode(['error' => 'Nombre de tabla o campo inválido']);
         exit;
     }
-    
+
     try {
-        // Obtener datos antes de actualizar para la bitácora
-        $selectStmt = $conn->prepare("SELECT * FROM `$tableName` WHERE `$idField` = ?");
-        $selectStmt->bind_param("s", $recordId);
-        $selectStmt->execute();
-        $result = $selectStmt->get_result();
-        $datosAnteriores = $result->fetch_assoc();
-        $selectStmt->close();
-        
-        // Construir la consulta de actualización
+        // Obtener datos antes de actualizar
+        $selectStmt = $conn->prepare("SELECT * FROM $tableName WHERE $idField = :id");
+        $selectStmt->execute([':id' => $recordId]);
+        $datosAnteriores = $selectStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$datosAnteriores) {
+            echo json_encode(['error' => 'Registro no encontrado']);
+            exit;
+        }
+
+        // Construir dinámicamente los campos para el UPDATE
         $updateFields = [];
-        $values = [];
-        $types = '';
+        $updateValues = [];
         $datosNuevos = [];
-        
+
         foreach ($_POST as $key => $value) {
-            if ($key !== 'api' && $key !== 'table' && $key !== 'id' && $key !== 'field') {
-                $updateFields[] = "`$key` = ?";
-                $values[] = $value;
-                $types .= 's';
+            if (!in_array($key, ['api', 'table', 'id', 'field'])) {
+                if (!preg_match('/^[a-zA-Z0-9_]+$/', $key)) continue; // Validar campos
+
+                $updateFields[] = "$key = :$key";
+                $updateValues[":$key"] = $value;
                 $datosNuevos[$key] = $value;
             }
         }
-        
+
         if (empty($updateFields)) {
             echo json_encode(['error' => 'No hay campos para actualizar']);
             exit;
         }
-        
-        $sql = "UPDATE `$tableName` SET " . implode(', ', $updateFields) . " WHERE `$idField` = ?";
-        $values[] = $recordId;
-        $types .= 's';
-        
+
+        $updateValues[":id"] = $recordId;
+        $sql = "UPDATE $tableName SET " . implode(', ', $updateFields) . " WHERE $idField = :id";
+
         $updateStmt = $conn->prepare($sql);
-        $updateStmt->bind_param($types, ...$values);
-        
-        if ($updateStmt->execute()) {
-            if ($updateStmt->affected_rows > 0) {
-                // Registrar en bitácora
-                registrarEnBitacora(
-                    $conn, 
-                    $usuario, 
-                    'ACTUALIZAR', 
-                    $tableName, 
-                    $recordId, 
-                    "Registro actualizado en la tabla $tableName",
-                    $datosAnteriores,
-                    array_merge($datosAnteriores, $datosNuevos)
-                );
-                
-                echo json_encode(['success' => 'Registro actualizado correctamente']);
-            } else {
-                echo json_encode(['error' => 'No se realizaron cambios o no se encontró el registro']);
-            }
+        $updateStmt->execute($updateValues);
+
+        if ($updateStmt->rowCount() > 0) {
+            // Registrar en bitácora
+            registrarEnBitacora(
+                $conn,
+                $usuario,
+                'ACTUALIZAR',
+                $tableName,
+                $recordId,
+                "Registro actualizado en la tabla $tableName",
+                $datosAnteriores,
+                array_merge($datosAnteriores, $datosNuevos)
+            );
+
+            echo json_encode(['success' => 'Registro actualizado correctamente']);
         } else {
-            echo json_encode(['error' => 'Error al actualizar el registro']);
+            echo json_encode(['error' => 'No se realizaron cambios o no se encontró el registro']);
         }
-        
-        $updateStmt->close();
-        
+
     } catch (Exception $e) {
         echo json_encode(['error' => 'Error: ' . $e->getMessage()]);
     }
-    
-    $conn->close();
+
     exit;
 }
+
 // API para registrar consultas
 if (isset($_POST['api']) && $_POST['api'] == 'log_consulta' && isset($_POST['tabla'])) {
     $tableName = $_POST['tabla'];
-    $usuario = 'usuarioweb'; // Cambiar por el usuario actual si tienes sesiones
-    
-    registrarEnBitacora(
-        $conn, 
-        $usuario, 
-        'CONSULTAR', 
-        $tableName, 
-        null, 
-        "Consulta realizada a la tabla $tableName",
-        null,
-        null
-    );
-    
-    echo json_encode(['success' => 'Consulta registrada']);
-    $conn->close();
+    $usuario = 'usuarioweb'; // o $_SESSION['usuario']
+
+    try {
+        registrarEnBitacora(
+            $conn,
+            $usuario,
+            'CONSULTAR',
+            $tableName,
+            null,
+            "Consulta realizada a la tabla $tableName",
+            null,
+            null
+        );
+
+        echo json_encode(['success' => 'Consulta registrada']);
+    } catch (Exception $e) {
+        echo json_encode(['error' => 'Error al registrar consulta: ' . $e->getMessage()]);
+    }
+
     exit;
 }
+
 
 // API para el buscador de tablas (MANTÉN tu código actual)
 if (isset($_GET['api']) && $_GET['api'] == 'table' && isset($_GET['name'])) {
     header('Content-Type: application/json');
-    
+
     $tableName = $_GET['name'];
     $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
     $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
     $offset = ($page - 1) * $limit;
-    
+
     // Validar nombre de tabla
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName)) {
         echo json_encode(['error' => 'Nombre de tabla inválido']);
         exit;
     }
-    
+
     try {
-        // Verificar si la tabla existe
-        $checkTable = $conn->query("SHOW TABLES LIKE '$tableName'");
-        if ($checkTable->num_rows === 0) {
+        // Verificar si la tabla existe en PostgreSQL
+        $stmt = $conn->prepare("SELECT to_regclass(:tableName) AS exists");
+        $stmt->execute([':tableName' => $tableName]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$result['exists']) {
             echo json_encode(['error' => "La tabla '$tableName' no existe"]);
             exit;
         }
-        
+
         // Obtener total de registros
-        $countResult = $conn->query("SELECT COUNT(*) as total FROM `$tableName`");
-        $total = $countResult->fetch_assoc()['total'];
-        
-        // Obtener datos con paginación
-        $dataResult = $conn->query("SELECT * FROM `$tableName` LIMIT $limit OFFSET $offset");
-        $rows = [];
-        while ($row = $dataResult->fetch_assoc()) {
-            $rows[] = $row;
-        }
-        
+        $stmtCount = $conn->prepare("SELECT COUNT(*) AS total FROM $tableName");
+        $stmtCount->execute();
+        $total = $stmtCount->fetch(PDO::FETCH_ASSOC)['total'];
+
+        // Obtener registros paginados
+        $stmtData = $conn->prepare("SELECT * FROM $tableName LIMIT :limit OFFSET :offset");
+        $stmtData->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmtData->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmtData->execute();
+
+        $rows = $stmtData->fetchAll(PDO::FETCH_ASSOC);
+
         echo json_encode([
             'tableName' => $tableName,
             'total' => (int)$total,
@@ -234,101 +238,84 @@ if (isset($_GET['api']) && $_GET['api'] == 'table' && isset($_GET['name'])) {
             'limit' => $limit,
             'rows' => $rows
         ]);
-        
     } catch (Exception $e) {
         echo json_encode(['error' => 'Error al consultar la tabla: ' . $e->getMessage()]);
     }
-    
-    $conn->close();
+
     exit;
 }
+
 
 // API para obtener bitácora (NUEVO - AGREGAR)
 if (isset($_GET['api']) && $_GET['api'] == 'bitacora') {
     header('Content-Type: application/json');
-    
+
     $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
     $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
     $offset = ($page - 1) * $limit;
-    
+
     $filtroUsuario = isset($_GET['usuario']) ? $_GET['usuario'] : '';
     $filtroAccion = isset($_GET['accion']) ? $_GET['accion'] : '';
     $filtroTabla = isset($_GET['tabla']) ? $_GET['tabla'] : '';
-    
+
     try {
         // Construir consulta con filtros
         $whereConditions = [];
         $params = [];
-        $types = '';
-        
+
         if (!empty($filtroUsuario)) {
-            $whereConditions[] = "usuario LIKE ?";
-            $params[] = "%$filtroUsuario%";
-            $types .= 's';
+            $whereConditions[] = "usuario ILIKE :usuario";
+            $params[':usuario'] = "%$filtroUsuario%";
         }
-        
+
         if (!empty($filtroAccion)) {
-            $whereConditions[] = "accion = ?";
-            $params[] = $filtroAccion;
-            $types .= 's';
+            $whereConditions[] = "accion = :accion";
+            $params[':accion'] = $filtroAccion;
         }
-        
+
         if (!empty($filtroTabla)) {
-            $whereConditions[] = "tabla_afectada = ?";
-            $params[] = $filtroTabla;
-            $types .= 's';
+            $whereConditions[] = "tabla_afectada = :tabla";
+            $params[':tabla'] = $filtroTabla;
         }
-        
+
         $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
-        
+
         // Obtener total de registros
         $countSql = "SELECT COUNT(*) as total FROM bitacora $whereClause";
-        if (!empty($params)) {
-            $countStmt = $conn->prepare($countSql);
-            $countStmt->bind_param($types, ...$params);
-            $countStmt->execute();
-            $countResult = $countStmt->get_result();
-            $total = $countResult->fetch_assoc()['total'];
-            $countStmt->close();
-        } else {
-            $countResult = $conn->query($countSql);
-            $total = $countResult->fetch_assoc()['total'];
-        }
-        
+        $countStmt = $conn->prepare($countSql);
+        $countStmt->execute($params);
+        $total = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
+
         // Obtener datos con paginación
-        $dataSql = "SELECT * FROM bitacora $whereClause ORDER BY fecha_hora DESC LIMIT $limit OFFSET $offset";
-        if (!empty($params)) {
-            $dataStmt = $conn->prepare($dataSql);
-            $dataStmt->bind_param($types, ...$params);
-            $dataStmt->execute();
-            $dataResult = $dataStmt->get_result();
-        } else {
-            $dataResult = $conn->query($dataSql);
+        $dataSql = "SELECT * FROM bitacora $whereClause ORDER BY fecha_hora DESC LIMIT :limit OFFSET :offset";
+        $dataStmt = $conn->prepare($dataSql);
+
+        // Bind de parámetros dinámicos
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value);
         }
-        
-        $rows = [];
-        while ($row = $dataResult->fetch_assoc()) {
-            $rows[] = $row;
-        }
-        
-        if (!empty($params)) {
-            $dataStmt->close();
-        }
-        
+
+        $dataStmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+
+        $dataStmt->execute();
+
+        $rows = $dataStmt->fetchAll(PDO::FETCH_ASSOC);
+
         echo json_encode([
             'total' => (int)$total,
             'page' => $page,
             'limit' => $limit,
             'rows' => $rows
         ]);
-        
+
     } catch (Exception $e) {
         echo json_encode(['error' => 'Error al consultar la bitácora: ' . $e->getMessage()]);
     }
-    
-    $conn->close();
+
     exit;
 }
+
 ?>
 <html lang="en">
     
