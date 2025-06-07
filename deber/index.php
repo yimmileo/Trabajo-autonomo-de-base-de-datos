@@ -91,6 +91,7 @@ if (isset($_GET['api']) && $_GET['api'] == 'delete' && isset($_GET['table']) && 
 
 // API para actualizar registro (REEMPLAZA tu código actual)
 if (isset($_POST['api']) && $_POST['api'] == 'update' && isset($_POST['table']) && isset($_POST['id'])) {
+    error_log('POST data recibido: ' . print_r($_POST, true));
     header('Content-Type: application/json');
 
     $tableName = $_POST['table'];
@@ -218,13 +219,49 @@ if (isset($_GET['api']) && $_GET['api'] == 'table' && isset($_GET['name'])) {
             exit;
         }
 
+        // Obtener información de las columnas para detectar la clave primaria
+        $columnInfoQuery = "
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns 
+            WHERE table_name = :tableName 
+            ORDER BY ordinal_position
+        ";
+        $stmtColumns = $conn->prepare($columnInfoQuery);
+        $stmtColumns->execute([':tableName' => $tableName]);
+        $columns = $stmtColumns->fetchAll(PDO::FETCH_ASSOC);
+
+        // Detectar columna de ordenamiento (buscar ID o primera columna)
+        $orderColumn = 'id'; // Por defecto
+        foreach ($columns as $col) {
+            if (strtolower($col['column_name']) === 'id' || 
+                strtolower($col['column_name']) === $tableName . '_id' ||
+                strpos(strtolower($col['column_name']), 'id') === 0) {
+                $orderColumn = $col['column_name'];
+                break;
+            }
+        }
+        
+        // Si no encuentra columna ID, usar la primera columna
+        if (!$orderColumn || $orderColumn === 'id') {
+            // Verificar si existe la columna 'id'
+            $checkIdQuery = "SELECT column_name FROM information_schema.columns WHERE table_name = :tableName AND column_name = 'id'";
+            $checkIdStmt = $conn->prepare($checkIdQuery);
+            $checkIdStmt->execute([':tableName' => $tableName]);
+            
+            if (!$checkIdStmt->fetch()) {
+                // Si no existe 'id', usar la primera columna
+                $orderColumn = $columns[0]['column_name'] ?? '1'; // '1' como fallback
+            }
+        }
+
         // Obtener total de registros
         $stmtCount = $conn->prepare("SELECT COUNT(*) AS total FROM $tableName");
         $stmtCount->execute();
         $total = $stmtCount->fetch(PDO::FETCH_ASSOC)['total'];
 
-        // Obtener registros paginados
-        $stmtData = $conn->prepare("SELECT * FROM $tableName LIMIT :limit OFFSET :offset");
+        // Obtener registros paginados CON ORDEN
+        $orderByClause = "ORDER BY $orderColumn ASC";
+        $stmtData = $conn->prepare("SELECT * FROM $tableName $orderByClause LIMIT :limit OFFSET :offset");
         $stmtData->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmtData->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmtData->execute();
@@ -236,6 +273,7 @@ if (isset($_GET['api']) && $_GET['api'] == 'table' && isset($_GET['name'])) {
             'total' => (int)$total,
             'page' => $page,
             'limit' => $limit,
+            'orderBy' => $orderColumn,
             'rows' => $rows
         ]);
     } catch (Exception $e) {
@@ -1131,21 +1169,34 @@ function closeEditModal() {
 // Función para guardar los cambios
 async function saveRecord() {
     const form = document.getElementById('editForm');
-    const formData = new FormData(form);
+    const formInputs = form.querySelectorAll('input');
     
-    // Agregar datos adicionales
-    formData.append('api', 'update');
-    formData.append('table', currentEditData.tableName);
-    formData.append('id', currentEditData.id);
-    formData.append('field', currentEditData.idField);
+    // Crear parámetros URL-encoded en lugar de FormData
+    let postData = 'api=update';
+    postData += `&table=${encodeURIComponent(currentEditData.tableName)}`;
+    postData += `&id=${encodeURIComponent(currentEditData.id)}`;
+    postData += `&field=${encodeURIComponent(currentEditData.idField)}`;
+    
+    // Agregar todos los campos del formulario
+    formInputs.forEach(input => {
+        if (input.name) {  // Solo si el input tiene name
+            postData += `&${encodeURIComponent(input.name)}=${encodeURIComponent(input.value)}`;
+        }
+    });
+    
+    console.log('Enviando datos:', postData); // Para debug
     
     try {
         const response = await fetch('', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: postData
         });
         
         const result = await response.json();
+        console.log('Respuesta del servidor:', result); // Para debug
         
         if (result.success) {
             alert('Registro actualizado correctamente');
@@ -1156,6 +1207,7 @@ async function saveRecord() {
             alert('Error: ' + result.error);
         }
     } catch (error) {
+        console.error('Error completo:', error);
         alert('Error al actualizar el registro: ' + error.message);
     }
 }
@@ -1257,7 +1309,7 @@ function mostrarDatosBitacora(data) {
                 <td>${fecha}</td>
                 <td>
                     ${(row.datos_anteriores || row.datos_nuevos) ? 
-                        `<button class="btn-action btn-edit" onclick="verDetallesBitacora(${row.id}, '${row.accion}', ${JSON.stringify(row.datos_anteriores).replace(/"/g, '&quot;')}, ${JSON.stringify(row.datos_nuevos).replace(/"/g, '&quot;')})">
+                        `<button class="btn-action btn-edit" onclick="verDetallesBitacora(${row.id}, '${row.accion}')">
                             👁️ Ver
                         </button>` : 
                         '-'
@@ -1280,6 +1332,9 @@ function mostrarDatosBitacora(data) {
     }
 
     resultsDiv.innerHTML = tableHTML;
+    
+    // Guardar los datos en una variable global para acceder desde verDetallesBitacora
+    window.bitacoraData = data.rows;
 }
 
 // Función para crear paginación de bitácora
@@ -1307,8 +1362,33 @@ function crearPaginacionBitacora() {
 }
 
 // Función para ver detalles de bitácora
-function verDetallesBitacora(id, accion, datosAnteriores, datosNuevos) {
+function verDetallesBitacora(id, accion) {
+    // Buscar el registro en los datos guardados
+    const registro = window.bitacoraData.find(row => row.id == id);
+    
+    if (!registro) {
+        alert('No se encontraron los datos del registro');
+        return;
+    }
+    
     let contenido = `<h4>Detalles del Registro #${id}</h4><br>`;
+    
+    // Parsear los datos JSON si existen
+    let datosAnteriores = null;
+    let datosNuevos = null;
+    
+    try {
+        if (registro.datos_anteriores) {
+            datosAnteriores = typeof registro.datos_anteriores === 'string' ? 
+                JSON.parse(registro.datos_anteriores) : registro.datos_anteriores;
+        }
+        if (registro.datos_nuevos) {
+            datosNuevos = typeof registro.datos_nuevos === 'string' ? 
+                JSON.parse(registro.datos_nuevos) : registro.datos_nuevos;
+        }
+    } catch (e) {
+        console.error('Error al parsear JSON:', e);
+    }
     
     if (accion === 'ELIMINAR' && datosAnteriores) {
         contenido += '<h5>Datos eliminados:</h5>';
@@ -1325,6 +1405,10 @@ function verDetallesBitacora(id, accion, datosAnteriores, datosNuevos) {
         contenido += '<div style="background: #d1edff; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px;">';
         contenido += JSON.stringify(datosNuevos, null, 2).replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
         contenido += '</div>';
+    } else if (accion === 'CONSULTAR') {
+        contenido += '<p>Esta acción no tiene datos asociados (solo consulta).</p>';
+    } else {
+        contenido += '<p>No hay datos adicionales para mostrar.</p>';
     }
     
     const modalHTML = `
