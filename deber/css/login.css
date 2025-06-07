@@ -1,0 +1,207 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f4ece4;
+    color: #3e2c23;
+    background-image: url('../images/Ingredientes.png');
+    background-attachment: scroll;
+    background-size: cover;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    background: #fff5e9;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #b08968;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.8em;
+    color: #a97155;
+}
+
+nav ul {
+    list-style: none;
+    display: flex;
+    gap: 20px;
+    padding: 0;
+    margin: 0;
+}
+
+nav a {
+    text-decoration: none;
+    color: #7c5e48;
+    font-weight: bold;
+}
+
+nav a:hover {
+    color: #b08968;
+}
+
+main {
+    padding: 20px;
+    max-width: 1000px;
+    margin: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+    width: 100%;
+}
+
+.formulario {
+    background: rgba(255, 245, 233, 0.95);
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 8px 25px rgba(60, 44, 35, 0.15);
+    max-width: 450px;
+    width: 100%;
+    border: 2px solid #b08968;
+}
+
+.formulario h1 {
+    text-align: center;
+    color: #a97155;
+    margin-bottom: 30px;
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.campo {
+    margin-bottom: 25px;
+}
+
+.campo label {
+    display: block;
+    margin-bottom: 8px;
+    color: #7c5e48;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.campo input {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid #d4c4b0;
+    border-radius: 8px;
+    font-size: 1em;
+    background: #fefcf9;
+    color: #3e2c23;
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+}
+
+.campo input:focus {
+    outline: none;
+    border-color: #a97155;
+    box-shadow: 0 0 8px rgba(169, 113, 85, 0.3);
+    background: #fff;
+}
+
+.campo input.valido {
+    border-color: #4a7c59;
+    background: #f0f8f0;
+}
+
+.campo input.invalido {
+    border-color: #d63384;
+    background: #fdf2f2;
+}
+
+.mensaje-error {
+    display: block;
+    color: #d63384;
+    font-size: 0.9em;
+    margin-top: 5px;
+    min-height: 20px;
+    font-weight: 500;
+}
+
+#btnlogin {
+    width: 100%;
+    padding: 15px;
+    background: #a97155;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+#btnlogin:hover {
+    background: #8a5d47;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(169, 113, 85, 0.3);
+}
+
+#btnlogin:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(169, 113, 85, 0.3);
+}
+
+.formulario > div {
+    text-align: center;
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 1px solid #d4c4b0;
+}
+
+.formulario > div p {
+    color: #7c5e48;
+    font-size: 1em;
+}
+
+.formulario > div a {
+    color: #a97155;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s ease;
+}
+
+.formulario > div a:hover {
+    color: #b08968;
+    text-decoration: underline;
+}
+
+footer {
+    background: #b08968;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    margin-top: 40px;
+    border-radius: 12px 12px 0 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Responsive */
+
+@media (max-width: 768px) {
+    .formulario {
+        margin: 20px;
+        padding: 30px 25px;
+    }
+    
+    header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+    
+    nav ul {
+        justify-content: center;
+    }
+    
+    main {
+        min-height: auto;
+    }
+}

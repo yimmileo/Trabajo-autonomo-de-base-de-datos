@@ -1,0 +1,291 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f4ece4;
+    color: #3e2c23;
+    background-image: url('../images/Ingredientes.png');
+    background-attachment:scroll;
+    background-size: cover;
+}
+
+header {
+    background: #fff5e9;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #b08968;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.8em;
+    color: #a97155;
+}
+
+nav ul {
+    list-style: none;
+    display: flex;
+    gap: 20px;
+    padding: 0;
+    margin: 0;
+}
+
+nav a {
+    text-decoration: none;
+    color: #7c5e48;
+    font-weight: bold;
+}
+
+nav a:hover {
+    color: #b08968;
+}
+
+main {
+    padding: 20px;
+    max-width: 1000px;
+    margin: auto;
+}
+
+.presentacion {
+    background: #b08968;
+    color: white;
+    padding: 30px;
+    text-align: center;
+    border-radius: 12px;
+    margin-bottom: 40px;
+}
+
+.recetas-destacadas h2 {
+    text-align: center;
+    color: #a97155;
+    margin-bottom: 20px;
+}
+
+.recetas-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+}
+.receta {
+    background: #fff;
+    border-radius: 12px;
+    width: 300px;
+    overflow: hidden;
+    border: 1px solid #e6ccb2;
+}
+
+.receta img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+}
+
+.receta h3 {
+    margin: 16px;
+    font-size: 1.2em;
+    color: #b08968;
+}
+
+.receta p {
+    padding: 0 16px 16px;
+    color: #7c5e48;
+    font-size: 0.95em;
+}
+.receta:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+
+
+
+.tarjetas {
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.movimiento_tarjetas {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+}
+
+.tarjeta1,
+.tarjeta2,
+.tarjeta3 {
+    
+    background-color: #ffffff;
+    border: 1px solid #e6ccb2;
+    border-radius: 12px;
+    padding: 20px;
+    width: 250px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+    transition: transform 0.2s;
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+
+.tarjeta1:hover,
+.tarjeta2:hover,
+.tarjeta3:hover {
+    transform: scale(1.05);
+}
+
+.tarjetas h3 {
+    font-size: 1.2em;
+    color: #7c5e48;
+    margin-bottom: 10px;
+}
+
+.icono {
+    font-size: 2.5em;
+    color: #b08968;
+}
+
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-contenido {
+    background-color: #fff5e9;
+    margin: 5% auto;
+    padding: 30px;
+    border: none;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+.cerrar {
+    color: #7c5e48;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    position: absolute;
+    right: 20px;
+    top: 15px;
+}
+
+.cerrar:hover {
+    color: #b08968;
+}
+
+.modal-contenido h2 {
+    color: #a97155;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.campo {
+    margin-bottom: 20px;
+}
+
+.campo label {
+    display: block;
+    margin-bottom: 8px;
+    color: #7c5e48;
+    font-weight: bold;
+}
+
+.campo input[type="text"],
+.campo input[type="file"],
+.campo textarea {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e6ccb2;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    box-sizing: border-box;
+}
+
+.campo input[type="text"]:focus,
+.campo textarea:focus {
+    outline: none;
+    border-color: #b08968;
+}
+
+.campo textarea {
+    resize: vertical;
+    min-height: 100px;
+}
+
+.botones {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 25px;
+}
+
+.botones button {
+    padding: 12px 25px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.botones button[type="submit"] {
+    background-color: #b08968;
+    color: white;
+}
+
+.botones button[type="submit"]:hover {
+    background-color: #a97155;
+}
+
+.botones button[type="button"] {
+    background-color: #e6ccb2;
+    color: #7c5e48;
+}
+
+.botones button[type="button"]:hover {
+    background-color: #d4b896;
+}
+.modal-content {
+    background-color: #fff5e9;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    background-color: #b08968;
+    color: white;
+}
+
+.modal-title {
+    color: #fff;
+}
+
+.list-group-item {
+    background-color: #fff;
+    border: 1px solid #e6ccb2;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+.list-group-item strong {
+    color: #7c5e48;
+}
+
+
+
+
