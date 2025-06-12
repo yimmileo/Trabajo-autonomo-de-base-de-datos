@@ -24,23 +24,19 @@ function verificarPermiso($accion, $tabla = null) {
     
     switch ($rol) {
         case 'admin':
-            // Admin puede hacer todo
             return true;
             
         case 'empleado':
             $tablasPermitidas = ['productos', 'clientes', 'ventas', 'categorias', 'usuarios'];
             
-            // Empleado solo puede hacer SELECT y UPDATE
             if ($accion === 'SELECT' || $accion === 'UPDATE') {
                 return !$tabla || in_array($tabla, $tablasPermitidas);
             }
             
-            // No puede hacer INSERT ni DELETE
             if ($accion === 'INSERT' || $accion === 'DELETE') {
                 return false;
             }
             
-            // No puede acceder a bitácora
             if ($tabla === 'bitacora') {
                 return false;
             }
@@ -50,7 +46,6 @@ function verificarPermiso($accion, $tabla = null) {
         case 'cliente':
             $tablasLectura = ['productos', 'categorias'];
             
-            // Cliente solo puede hacer SELECT en productos y categorías
             if ($accion === 'SELECT') {
                 return !$tabla || in_array($tabla, $tablasLectura);
             }
@@ -65,7 +60,6 @@ function verificarPermiso($accion, $tabla = null) {
 // Función para registrar en bitácora
 function registrarEnBitacora($conn, $usuario, $accion, $tabla, $registroId, $detalles, $datosAnteriores = null, $datosNuevos = null) {
     try {
-        // Obtener IP real del usuario
         $ip = 'unknown';
         if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
             $ip = $_SERVER['HTTP_CLIENT_IP'];
@@ -75,7 +69,6 @@ function registrarEnBitacora($conn, $usuario, $accion, $tabla, $registroId, $det
             $ip = $_SERVER['REMOTE_ADDR'];
         }
 
-        // Preparar SQL que coincida con tu estructura de tabla
         $sql = "INSERT INTO bitacora 
                 (usuario, accion, tabla_afectada, registro_id, detalles, ip_usuario, 
                  datos_anteriores, datos_nuevos, fecha_hora) 
@@ -83,7 +76,6 @@ function registrarEnBitacora($conn, $usuario, $accion, $tabla, $registroId, $det
         
         $stmt = $conn->prepare($sql);
 
-        // Convertir arrays a JSON para PostgreSQL
         $datosAnterioresJson = $datosAnteriores ? json_encode($datosAnteriores, JSON_UNESCAPED_UNICODE) : null;
         $datosNuevosJson = $datosNuevos ? json_encode($datosNuevos, JSON_UNESCAPED_UNICODE) : null;
 
@@ -92,26 +84,13 @@ function registrarEnBitacora($conn, $usuario, $accion, $tabla, $registroId, $det
             $datosAnterioresJson, $datosNuevosJson
         ]);
         
-        // Debug: verificar si se insertó
         error_log("Bitácora insertada: Usuario=$usuario, Acción=$accion, Tabla=$tabla");
         
     } catch (Exception $e) {
         error_log("Error al registrar en bitácora: " . $e->getMessage());
-        // También mostrar el error para debug
         echo "<!-- Error bitácora: " . $e->getMessage() . " -->";
     }
 }
-
-// Función para detectar el navegador
-function obtenerNavegador($userAgent) {
-    if (strpos($userAgent, 'Chrome') !== false) return 'Chrome';
-    if (strpos($userAgent, 'Firefox') !== false) return 'Firefox';
-    if (strpos($userAgent, 'Safari') !== false) return 'Safari';
-    if (strpos($userAgent, 'Edge') !== false) return 'Edge';
-    if (strpos($userAgent, 'Opera') !== false) return 'Opera';
-    return 'Desconocido';
-}
-
 
 // API para logout
 if (isset($_POST['api']) && $_POST['api'] == 'logout') {
@@ -135,11 +114,13 @@ if (isset($_POST['api']) && $_POST['api'] == 'logout') {
     exit;
 }
 
-// API para obtener datos de cualquier tabla
+// API MODIFICADA para obtener datos con paginación
 if (isset($_GET['api']) && $_GET['api'] == 'get_data') {
     header('Content-Type: application/json');
     
     $tabla = $_GET['tabla'] ?? '';
+    $pagina = isset($_GET['pagina']) ? (int)$_GET['pagina'] : 1;
+    $registrosPorPagina = 5; // Fijo en 5 registros por página
     
     if (!verificarPermiso('SELECT', $tabla)) {
         echo json_encode(['success' => false, 'error' => 'No tiene permisos para ver esta tabla']);
@@ -147,15 +128,37 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_data') {
     }
     
     try {
-        $sql = "SELECT * FROM " . $tabla . " ORDER BY 1";
+        // Calcular offset
+        $offset = ($pagina - 1) * $registrosPorPagina;
+        
+        // Contar total de registros
+        $sqlCount = "SELECT COUNT(*) as total FROM " . $tabla;
+        $stmtCount = $conn->prepare($sqlCount);
+        $stmtCount->execute();
+        $totalRegistros = $stmtCount->fetch(PDO::FETCH_ASSOC)['total'];
+        
+        // Calcular total de páginas
+        $totalPaginas = ceil($totalRegistros / $registrosPorPagina);
+        
+        // Obtener datos paginados
+        $sql = "SELECT * FROM " . $tabla . " ORDER BY 1 LIMIT " . $registrosPorPagina . " OFFSET " . $offset;
         $stmt = $conn->prepare($sql);
         $stmt->execute();
         $datos = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        $descripcion = "Consultó todos los registros de la tabla $tabla (" . count($datos) . " registros encontrados)";
-registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'SELECT', $tabla, null, $descripcion);
+        $descripcion = "Consultó página $pagina de la tabla $tabla (" . count($datos) . " de $totalRegistros registros)";
+        registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'SELECT', $tabla, null, $descripcion);
         
-        echo json_encode(['success' => true, 'data' => $datos]);
+        echo json_encode([
+            'success' => true, 
+            'data' => $datos,
+            'paginacion' => [
+                'pagina_actual' => $pagina,
+                'total_paginas' => $totalPaginas,
+                'total_registros' => $totalRegistros,
+                'registros_por_pagina' => $registrosPorPagina
+            ]
+        ]);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'error' => 'Error al obtener datos: ' . $e->getMessage()]);
     }
@@ -188,6 +191,7 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_columns') {
     }
     exit;
 }
+
 // API para insertar datos
 if (isset($_POST['api']) && $_POST['api'] == 'insert_data') {
     header('Content-Type: application/json');
@@ -195,7 +199,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'insert_data') {
     $tabla = $_POST['tabla'] ?? '';
     $datosJson = $_POST['datos'] ?? '';
     
-    // Decodificar JSON
     $datos = json_decode($datosJson, true);
     
     if (!$datos) {
@@ -209,7 +212,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'insert_data') {
     }
     
     try {
-        // Filtrar datos vacíos y nulos
         $datos = array_filter($datos, function($value) {
             return $value !== '' && $value !== null;
         });
@@ -219,7 +221,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'insert_data') {
             exit;
         }
         
-        // Construir query de inserción
         $campos = array_keys($datos);
         $placeholders = array_fill(0, count($campos), '?');
         
@@ -230,16 +231,16 @@ if (isset($_POST['api']) && $_POST['api'] == 'insert_data') {
         $registroId = $conn->lastInsertId();
         
         $descripcion = "Insertó nuevo registro en tabla $tabla con ID $registroId";
-if ($tabla == 'productos' && isset($datos['nombre'])) {
-    $descripcion .= " - Producto: " . $datos['nombre'];
-} elseif ($tabla == 'clientes' && isset($datos['nombre'])) {
-    $descripcion .= " - Cliente: " . $datos['nombre'];
-} elseif ($tabla == 'usuarios' && isset($datos['usuario'])) {
-    $descripcion .= " - Usuario: " . $datos['usuario'];
-}
+        if ($tabla == 'productos' && isset($datos['nombre'])) {
+            $descripcion .= " - Producto: " . $datos['nombre'];
+        } elseif ($tabla == 'clientes' && isset($datos['nombre'])) {
+            $descripcion .= " - Cliente: " . $datos['nombre'];
+        } elseif ($tabla == 'usuarios' && isset($datos['usuario'])) {
+            $descripcion .= " - Usuario: " . $datos['usuario'];
+        }
 
-registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'INSERT', $tabla, $registroId, 
-                  $descripcion, null, $datos);
+        registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'INSERT', $tabla, $registroId, 
+                          $descripcion, null, $datos);
         
         echo json_encode(['success' => true, 'message' => 'Registro insertado correctamente']);
     } catch (Exception $e) {
@@ -257,7 +258,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'update_data') {
     $id = $_POST['id'] ?? '';
     $campoId = $_POST['campo_id'] ?? '';
     
-    // Decodificar JSON
     $datos = json_decode($datosJson, true);
     
     if (!$datos) {
@@ -271,13 +271,11 @@ if (isset($_POST['api']) && $_POST['api'] == 'update_data') {
     }
     
     try {
-        // Obtener datos anteriores para la bitácora
         $sqlAnterior = "SELECT * FROM " . $tabla . " WHERE " . $campoId . " = ?";
         $stmtAnterior = $conn->prepare($sqlAnterior);
         $stmtAnterior->execute([$id]);
         $datosAnteriores = $stmtAnterior->fetch(PDO::FETCH_ASSOC);
         
-        // Filtrar datos vacíos pero permitir valores falsy válidos como 0
         $datosLimpios = [];
         foreach($datos as $key => $value) {
             if ($value !== '' && $value !== null && $key !== $campoId) {
@@ -290,7 +288,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'update_data') {
             exit;
         }
         
-        // Construir query de actualización
         $campos = array_keys($datosLimpios);
         $setClause = implode(' = ?, ', $campos) . ' = ?';
         
@@ -302,19 +299,19 @@ if (isset($_POST['api']) && $_POST['api'] == 'update_data') {
         $stmt->execute($valores);
         
         $descripcion = "Actualizó registro ID $id en tabla $tabla";
-$cambios = [];
-foreach($datosLimpios as $campo => $valorNuevo) {
-    $valorAnterior = $datosAnteriores[$campo] ?? 'NULL';
-    if ($valorAnterior != $valorNuevo) {
-        $cambios[] = "cambió $campo de '$valorAnterior' a '$valorNuevo'";
-    }
-}
-if (!empty($cambios)) {
-    $descripcion .= " - " . implode(', ', $cambios);
-}
+        $cambios = [];
+        foreach($datosLimpios as $campo => $valorNuevo) {
+            $valorAnterior = $datosAnteriores[$campo] ?? 'NULL';
+            if ($valorAnterior != $valorNuevo) {
+                $cambios[] = "cambió $campo de '$valorAnterior' a '$valorNuevo'";
+            }
+        }
+        if (!empty($cambios)) {
+            $descripcion .= " - " . implode(', ', $cambios);
+        }
 
-registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'UPDATE', $tabla, $id, 
-                  $descripcion, $datosAnteriores, $datosLimpios);
+        registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'UPDATE', $tabla, $id, 
+                          $descripcion, $datosAnteriores, $datosLimpios);
         
         echo json_encode(['success' => true, 'message' => 'Registro actualizado correctamente']);
     } catch (Exception $e) {
@@ -322,6 +319,7 @@ registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'UPDATE', $tabla, $id,
     }
     exit;
 }
+
 // API para eliminar datos
 if (isset($_POST['api']) && $_POST['api'] == 'delete_data') {
     header('Content-Type: application/json');
@@ -336,7 +334,6 @@ if (isset($_POST['api']) && $_POST['api'] == 'delete_data') {
     }
     
     try {
-        // Obtener datos antes de eliminar para la bitácora
         $sqlAnterior = "SELECT * FROM " . $tabla . " WHERE " . $campoId . " = ?";
         $stmtAnterior = $conn->prepare($sqlAnterior);
         $stmtAnterior->execute([$id]);
@@ -347,16 +344,16 @@ if (isset($_POST['api']) && $_POST['api'] == 'delete_data') {
         $stmt->execute([$id]);
         
         $descripcion = "Eliminó registro ID $id de tabla $tabla";
-if ($tabla == 'productos' && isset($datosAnteriores['nombre'])) {
-    $descripcion .= " - Producto: " . $datosAnteriores['nombre'];
-} elseif ($tabla == 'clientes' && isset($datosAnteriores['nombre'])) {
-    $descripcion .= " - Cliente: " . $datosAnteriores['nombre'];
-} elseif ($tabla == 'usuarios' && isset($datosAnteriores['usuario'])) {
-    $descripcion .= " - Usuario: " . $datosAnteriores['usuario'];
-}
+        if ($tabla == 'productos' && isset($datosAnteriores['nombre'])) {
+            $descripcion .= " - Producto: " . $datosAnteriores['nombre'];
+        } elseif ($tabla == 'clientes' && isset($datosAnteriores['nombre'])) {
+            $descripcion .= " - Cliente: " . $datosAnteriores['nombre'];
+        } elseif ($tabla == 'usuarios' && isset($datosAnteriores['usuario'])) {
+            $descripcion .= " - Usuario: " . $datosAnteriores['usuario'];
+        }
 
-registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'DELETE', $tabla, $id, 
-                  $descripcion, $datosAnteriores, null);
+        registrarEnBitacora($conn, $_SESSION['usuario_nombre'], 'DELETE', $tabla, $id, 
+                          $descripcion, $datosAnteriores, null);
         
         echo json_encode(['success' => true, 'message' => 'Registro eliminado correctamente']);
     } catch (Exception $e) {
@@ -609,6 +606,56 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_record') {
             margin: 20px 0;
         }
 
+        /* ESTILOS PARA PAGINACIÓN */
+        .pagination-container {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .pagination-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: #0056b3;
+        }
+
+        .pagination-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .pagination-btn.active {
+            background: #28a745;
+        }
+
+        .pagination-btn.active:hover {
+            background: #218838;
+        }
+
         @media (max-width: 768px) {
             .user-info {
                 flex-direction: column;
@@ -626,9 +673,14 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_record') {
             .data-table {
                 font-size: 0.8em;
             }
+
+            .pagination-container {
+                flex-direction: column;
+                gap: 10px;
+            }
         }
 
-                .action-buttons {
+        .action-buttons {
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
@@ -824,6 +876,7 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_record') {
             </div>
             <button onclick="logout()" class="logout-btn">Cerrar Sesión</button>
         </div>
+        <a href="reportes.php" class="nav-btn" style="background: #28a745; color: white; text-decoration: none; padding: 8px 15px; border-radius: 5px; font-weight: bold;">📊 Reportes Avanzados</a>
 
         <div class="main-content">
             <div class="section">
@@ -868,439 +921,490 @@ if (isset($_GET['api']) && $_GET['api'] == 'get_record') {
             </div>
         </div>
     </div>
+    
 
     <script>
         let currentTable = '';
-let currentColumns = [];
+        let currentColumns = [];
+        let currentPage = 1;
+        let totalPages = 1;
 
-function logout() {
-    if (confirm('¿Está seguro que desea cerrar sesión?')) {
-        const formData = new FormData();
-        formData.append('api', 'logout');
-        
-        fetch('index.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                window.location.href = data.redirect || 'login.php';
+        function logout() {
+            if (confirm('¿Está seguro que desea cerrar sesión?')) {
+                const formData = new FormData();
+                formData.append('api', 'logout');
+                
+                fetch('index.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = data.redirect || 'login.php';
+                    }
+                })
+                .catch(() => {
+                    window.location.href = 'login.php';
+                });
             }
-        })
-        .catch(() => {
-            window.location.href = 'login.php';
-        });
-    }
-}
+        }
 
-function loadTable(tableName) {
-    currentTable = tableName;
-    const dataSection = document.getElementById('dataSection');
-    const tableTitle = document.getElementById('tableTitle');
-    const tableContent = document.getElementById('tableContent');
-    
-    // Mostrar sección y título
-    dataSection.style.display = 'block';
-    tableTitle.textContent = `📊 Datos de ${tableName.charAt(0).toUpperCase() + tableName.slice(1)}`;
-    tableContent.innerHTML = '<div class="loading">Cargando datos...</div>';
-    
-    // Scroll hacia la tabla
-    dataSection.scrollIntoView({ behavior: 'smooth' });
-    
-    // Cargar estructura de columnas primero
-    fetch(`index.php?api=get_columns&tabla=${tableName}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                currentColumns = data.columns;
-                loadTableData(tableName);
-            } else {
-                tableContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
-            }
-        })
-        .catch(error => {
-            tableContent.innerHTML = `<div class="error">Error de conexión: ${error.message}</div>`;
-        });
-}
-
-function loadTableData(tableName) {
-    const tableContent = document.getElementById('tableContent');
-    
-    fetch(`index.php?api=get_data&tabla=${tableName}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                displayTable(data.data, tableName);
-            } else {
-                tableContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
-            }
-        })
-        .catch(error => {
-            tableContent.innerHTML = `<div class="error">Error de conexión: ${error.message}</div>`;
-        });
-}
-
-function displayTable(data, tableName) {
-    const tableContent = document.getElementById('tableContent');
-    
-    // Botones de acción
-    let actionButtons = '<div class="action-buttons">';
-    
-    // Verificar permisos según el rol del usuario
-    const userRole = '<?php echo $_SESSION['usuario_rol']; ?>';
-    
-    if (userRole === 'admin') {
-        actionButtons += `<button class="action-btn btn-add" onclick="showAddModal('${tableName}')">➕ Agregar Nuevo</button>`;
-    }
-    
-    actionButtons += '</div>';
-    
-    if (!data || data.length === 0) {
-        tableContent.innerHTML = actionButtons + '<div class="loading">No hay datos en esta tabla.</div>';
-        return;
-    }
-    
-    // Crear tabla HTML
-    let html = actionButtons + '<table class="data-table"><thead><tr>';
-    
-    // Headers
-    const columns = Object.keys(data[0]);
-    columns.forEach(col => {
-        html += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`;
-    });
-    
-    // Columna de acciones si hay permisos
-    if (userRole === 'admin' || userRole === 'empleado') {
-        html += '<th>Acciones</th>';
-    }
-    
-    html += '</tr></thead><tbody>';
-    
-    // Filas de datos
-    data.forEach(row => {
-        html += '<tr>';
-        columns.forEach(col => {
-            let value = row[col];
-            if (value === null) value = '<em>null</em>';
-            else if (typeof value === 'object') value = JSON.stringify(value);
-            else if (typeof value === 'string' && value.length > 50) value = value.substring(0, 50) + '...';
-            html += `<td>${value}</td>`;
-        });
-        
-        // Botones de acción por fila
-        if (userRole === 'admin' || userRole === 'empleado') {
-            html += '<td class="action-cell">';
+        function loadTable(tableName, page = 1) {
+            currentTable = tableName;
+            currentPage = page;
+            const dataSection = document.getElementById('dataSection');
+            const tableTitle = document.getElementById('tableTitle');
+            const tableContent = document.getElementById('tableContent');
             
-            // Obtener el ID del primer campo (asumiendo que es la clave primaria)
-            const firstKey = columns[0];
-            const recordId = row[firstKey];
+            dataSection.style.display = 'block';
+            tableTitle.textContent = `📊 Datos de ${tableName.charAt(0).toUpperCase() + tableName.slice(1)}`;
+            tableContent.innerHTML = '<div class="loading">Cargando datos...</div>';
             
-            if (userRole === 'admin' || userRole === 'empleado') {
-                html += `<button class="action-btn btn-edit" onclick="showEditModal('${tableName}', '${recordId}', '${firstKey}')">✏️ Editar</button> `;
-            }
+            dataSection.scrollIntoView({ behavior: 'smooth' });
+            
+            // Cargar estructura de columnas primero
+            fetch(`index.php?api=get_columns&tabla=${tableName}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentColumns = data.columns;
+                        loadTableData(tableName, page);
+                    } else {
+                        tableContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    tableContent.innerHTML = `<div class="error">Error de conexión: ${error.message}</div>`;
+                });
+        }
+
+        function loadTableData(tableName, page = 1) {
+            const tableContent = document.getElementById('tableContent');
+            
+            fetch(`index.php?api=get_data&tabla=${tableName}&pagina=${page}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayTable(data.data, tableName, data.paginacion);
+                    } else {
+                        tableContent.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    tableContent.innerHTML = `<div class="error">Error de conexión: ${error.message}</div>`;
+                });
+        }
+
+        function displayTable(data, tableName, paginacion) {
+            const tableContent = document.getElementById('tableContent');
+            
+            // Actualizar variables de paginación
+            currentPage = paginacion.pagina_actual;
+            totalPages = paginacion.total_paginas;
+            
+            // Botones de acción
+            let actionButtons = '<div class="action-buttons">';
+            
+            const userRole = '<?php echo $_SESSION['usuario_rol']; ?>';
             
             if (userRole === 'admin') {
-                html += `<button class="action-btn btn-delete" onclick="deleteRecord('${tableName}', '${recordId}', '${firstKey}')">🗑️ Eliminar</button>`;
+                actionButtons += `<button class="action-btn btn-add" onclick="showAddModal('${tableName}')">➕ Agregar Nuevo</button>`;
             }
             
-            html += '</td>';
-        }
-        
-        html += '</tr>';
-    });
-    
-    html += '</tbody></table>';
-    
-    // Agregar modal para formularios
-    html += createModal();
-    
-    tableContent.innerHTML = html;
-}
-
-function createModal() {
-    return `
-        <div id="crudModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 class="modal-title" id="modalTitle"></h3>
-                    <button class="modal-close" onclick="closeModal()">&times;</button>
-                </div>
-                <div id="modalBody"></div>
-            </div>
-        </div>
-    `;
-}
-
-function showAddModal(tableName) {
-    const modal = document.getElementById('crudModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const modalBody = document.getElementById('modalBody');
-    
-    modalTitle.textContent = `Agregar nuevo registro a ${tableName}`;
-    
-    let formHtml = '<form id="crudForm">';
-    
-    currentColumns.forEach(col => {
-        // Saltar campos auto-incrementales (típicamente IDs)
-        if (col.column_name.toLowerCase().includes('id') && 
-            col.data_type === 'integer' && 
-            currentColumns.indexOf(col) === 0) {
-            return;
-        }
-        
-        formHtml += `
-            <div class="form-group">
-                <label for="${col.column_name}">${col.column_name.charAt(0).toUpperCase() + col.column_name.slice(1)}:</label>
-                ${getInputField(col)}
-            </div>
-        `;
-    });
-    
-    formHtml += `
-        <div class="form-actions">
-            <button type="button" class="btn-save" onclick="saveRecord('${tableName}', 'add')">💾 Guardar</button>
-            <button type="button" class="btn-cancel" onclick="closeModal()">❌ Cancelar</button>
-        </div>
-    </form>`;
-    
-    modalBody.innerHTML = formHtml;
-    modal.style.display = 'block';
-}
-
-function showEditModal(tableName, recordId, fieldId) {
-    const modal = document.getElementById('crudModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const modalBody = document.getElementById('modalBody');
-    
-    modalTitle.textContent = `Editar registro de ${tableName}`;
-    modalBody.innerHTML = '<div class="loading">Cargando datos...</div>';
-    modal.style.display = 'block';
-    
-    // Cargar datos del registro
-    fetch(`index.php?api=get_record&tabla=${tableName}&id=${recordId}&campo_id=${fieldId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                let formHtml = '<form id="crudForm">';
-                
-                currentColumns.forEach(col => {
-                    const value = data.data[col.column_name] || '';
-                    
-                    formHtml += `
-                        <div class="form-group">
-                            <label for="${col.column_name}">${col.column_name.charAt(0).toUpperCase() + col.column_name.slice(1)}:</label>
-                            ${getInputField(col, value, col.column_name === fieldId)}
-                        </div>
-                    `;
+            actionButtons += '</div>';
+            
+            if (!data || data.length === 0) {
+                tableContent.innerHTML = actionButtons + '<div class="loading">No hay datos en esta tabla.</div>' + createPaginationControls(paginacion);
+                return;
+            }
+            
+            // Crear tabla HTML
+            let html = actionButtons + '<table class="data-table"><thead><tr>';
+            
+            // Headers
+            const columns = Object.keys(data[0]);
+            columns.forEach(col => {
+                html += `<th>${col.charAt(0).toUpperCase() + col.slice(1)}</th>`;
+            });
+            
+            // Columna de acciones si hay permisos
+            if (userRole === 'admin' || userRole === 'empleado') {
+                html += '<th>Acciones</th>';
+            }
+            
+            html += '</tr></thead><tbody>';
+            
+            // Filas de datos
+            data.forEach(row => {
+                html += '<tr>';
+                columns.forEach(col => {
+                    let value = row[col];
+                    if (value === null) value = '<em>null</em>';
+                    else if (typeof value === 'object') value = JSON.stringify(value);
+                    else if (typeof value === 'string' && value.length > 50) value = value.substring(0, 50) + '...';
+                    html += `<td>${value}</td>`;
                 });
                 
-                formHtml += `
-                    <input type="hidden" id="recordId" value="${recordId}">
-                    <input type="hidden" id="fieldId" value="${fieldId}">
-                    <div class="form-actions">
-                        <button type="button" class="btn-save" onclick="saveRecord('${tableName}', 'edit')">💾 Actualizar</button>
-                        <button type="button" class="btn-cancel" onclick="closeModal()">❌ Cancelar</button>
-                    </div>
-                </form>`;
-                
-                modalBody.innerHTML = formHtml;
-            } else {
-                modalBody.innerHTML = `<div class="error">Error: ${data.error}</div>`;
-            }
-        })
-        .catch(error => {
-            modalBody.innerHTML = `<div class="error">Error: ${error.message}</div>`;
-        });
-}
-
-function getInputField(column, value = '', isReadOnly = false) {
-    const name = column.column_name;
-    const type = column.data_type.toLowerCase();
-    const readOnlyAttr = isReadOnly ? 'readonly' : '';
-    const required = column.is_nullable === 'NO' && !isReadOnly ? 'required' : '';
-    
-    // Escapar el valor para evitar problemas de HTML
-    const escapedValue = String(value).replace(/"/g, '&quot;');
-    
-    if (type.includes('text') || type.includes('varchar') && value.length > 50) {
-        return `<textarea name="${name}" id="${name}" ${readOnlyAttr} ${required}>${escapedValue}</textarea>`;
-    } else if (type.includes('int') || type.includes('numeric') || type.includes('decimal') || type.includes('float')) {
-        return `<input type="number" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required} step="any">`;
-    } else if (type.includes('date')) {
-        // Formatear fecha para input type="date"
-        let dateValue = '';
-        if (value && value !== '') {
-            const date = new Date(value);
-            if (!isNaN(date.getTime())) {
-                dateValue = date.toISOString().split('T')[0];
-            }
-        }
-        return `<input type="date" name="${name}" id="${name}" value="${dateValue}" ${readOnlyAttr} ${required}>`;
-    } else if (type.includes('timestamp') || type.includes('datetime')) {
-        // Formatear timestamp para input type="datetime-local"
-        let datetimeValue = '';
-        if (value && value !== '') {
-            const date = new Date(value);
-            if (!isNaN(date.getTime())) {
-                datetimeValue = date.toISOString().slice(0, 16);
-            }
-        }
-        return `<input type="datetime-local" name="${name}" id="${name}" value="${datetimeValue}" ${readOnlyAttr} ${required}>`;
-    } else if (type.includes('bool')) {
-        const checked = (value === true || value === 't' || value === '1' || value === 1) ? 'checked' : '';
-        const disabled = isReadOnly ? 'disabled' : '';
-        return `<input type="checkbox" name="${name}" id="${name}" ${checked} ${disabled}>`;
-    } else if (type.includes('email')) {
-        return `<input type="email" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required}>`;
-    } else {
-        return `<input type="text" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required}>`;
-    }
-}
-
-function saveRecord(tableName, action) {
-    const form = document.getElementById('crudForm');
-    const formData = new FormData();
-    
-    formData.append('api', action === 'add' ? 'insert_data' : 'update_data');
-    formData.append('tabla', tableName);
-    
-    const datos = {};
-    
-    // Recopilar datos del formulario
-    currentColumns.forEach(col => {
-        const input = document.getElementById(col.column_name);
-        if (input) {
-            if (input.type === 'checkbox') {
-                datos[col.column_name] = input.checked ? '1' : '0';
-            } else if (input.type === 'number') {
-                if (input.value !== '') {
-                    datos[col.column_name] = input.value;
+                // Botones de acción por fila
+                if (userRole === 'admin' || userRole === 'empleado') {
+                    html += '<td class="action-cell">';
+                    
+                    const firstKey = columns[0];
+                    const recordId = row[firstKey];
+                    
+                    if (userRole === 'admin' || userRole === 'empleado') {
+                        html += `<button class="action-btn btn-edit" onclick="showEditModal('${tableName}', '${recordId}', '${firstKey}')">✏️ Editar</button> `;
+                    }
+                    
+                    if (userRole === 'admin') {
+                        html += `<button class="action-btn btn-delete" onclick="deleteRecord('${tableName}', '${recordId}', '${firstKey}')">🗑️ Eliminar</button>`;
+                    }
+                    
+                    html += '</td>';
                 }
-            } else if (input.value !== '') {
-                datos[col.column_name] = input.value;
-            }
+                
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            
+            // Agregar controles de paginación
+            html += createPaginationControls(paginacion);
+            
+            // Agregar modal para formularios
+            html += createModal();
+            
+            tableContent.innerHTML = html;
         }
-    });
-    
-    // Validar que hay datos
-    if (Object.keys(datos).length === 0) {
-        showMessage('Debe llenar al menos un campo', 'error');
-        return;
-    }
-    
-    // Enviar como JSON string
-    formData.append('datos', JSON.stringify(datos));
-    
-    if (action === 'edit') {
-        const recordId = document.getElementById('recordId');
-        const fieldId = document.getElementById('fieldId');
-        
-        if (!recordId || !fieldId) {
-            showMessage('Error: No se encontraron los identificadores del registro', 'error');
-            return;
-        }
-        
-        formData.append('id', recordId.value);
-        formData.append('campo_id', fieldId.value);
-    }
-    
-    // Mostrar loading
-    const saveBtn = document.querySelector('.btn-save');
-    const originalText = saveBtn.textContent;
-    saveBtn.textContent = '⏳ Guardando...';
-    saveBtn.disabled = true;
-    
-    fetch('index.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        // Verificar si la respuesta es JSON válida
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('La respuesta del servidor no es JSON válida');
-        }
-        return response.json();
-    })
-    .then(data => {
-        saveBtn.textContent = originalText;
-        saveBtn.disabled = false;
-        
-        if (data.success) {
-            closeModal();
-            showMessage(data.message, 'success');
-            loadTableData(tableName);
-        } else {
-            showMessage(data.error, 'error');
-        }
-    })
-    .catch(error => {
-        saveBtn.textContent = originalText;
-        saveBtn.disabled = false;
-        
-        console.error('Error completo:', error);
-        showMessage('Error de conexión: ' + error.message, 'error');
-    });
-}
 
-function deleteRecord(tableName, recordId, fieldId) {
-    if (confirm('¿Está seguro que desea eliminar este registro? Esta acción no se puede deshacer.')) {
-        const formData = new FormData();
-        formData.append('api', 'delete_data');
-        formData.append('tabla', tableName);
-        formData.append('id', recordId);
-        formData.append('campo_id', fieldId);
-        
-        fetch('index.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showMessage(data.message, 'success');
-                loadTableData(tableName);
+        function createPaginationControls(paginacion) {
+            const { pagina_actual, total_paginas, total_registros, registros_por_pagina } = paginacion;
+            
+            let html = '<div class="pagination-container">';
+            
+            // Información de paginación
+            const inicio = ((pagina_actual - 1) * registros_por_pagina) + 1;
+            const fin = Math.min(pagina_actual * registros_por_pagina, total_registros);
+            
+            html += `<div class="pagination-info">
+                Mostrando ${inicio} - ${fin} de ${total_registros} registros
+            </div>`;
+            
+            // Controles de paginación
+            html += '<div class="pagination-controls">';
+            
+            // Botón Primera página
+            html += `<button class="pagination-btn" onclick="loadTable('${currentTable}', 1)" ${pagina_actual === 1 ? 'disabled' : ''}>
+                ⏮️ Primera
+            </button>`;
+            
+            // Botón Anterior
+            html += `<button class="pagination-btn" onclick="loadTable('${currentTable}', ${pagina_actual - 1})" ${pagina_actual === 1 ? 'disabled' : ''}>
+                ⬅️ Anterior
+            </button>`;
+            
+            // Números de página
+            const startPage = Math.max(1, pagina_actual - 2);
+            const endPage = Math.min(total_paginas, pagina_actual + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                const activeClass = i === pagina_actual ? 'active' : '';
+                html += `<button class="pagination-btn ${activeClass}" onclick="loadTable('${currentTable}', ${i})">
+                    ${i}
+                </button>`;
+            }
+            
+            // Botón Siguiente
+            html += `<button class="pagination-btn" onclick="loadTable('${currentTable}', ${pagina_actual + 1})" ${pagina_actual === total_paginas ? 'disabled' : ''}>
+                Siguiente ➡️
+            </button>`;
+            
+            // Botón Última página
+            html += `<button class="pagination-btn" onclick="loadTable('${currentTable}', ${total_paginas})" ${pagina_actual === total_paginas ? 'disabled' : ''}>
+                Última ⏭️
+            </button>`;
+            
+            html += '</div></div>';
+            
+            return html;
+        }
+
+        function createModal() {
+            return `
+                <div id="crudModal" class="modal">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title" id="modalTitle"></h3>
+                            <button class="modal-close" onclick="closeModal()">&times;</button>
+                        </div>
+                        <div id="modalBody"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showAddModal(tableName) {
+            const modal = document.getElementById('crudModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            modalTitle.textContent = `Agregar nuevo registro a ${tableName}`;
+            
+            let formHtml = '<form id="crudForm">';
+            
+            currentColumns.forEach(col => {
+                if (col.column_name.toLowerCase().includes('id') && 
+                    col.data_type === 'integer' && 
+                    currentColumns.indexOf(col) === 0) {
+                    return;
+                }
+                
+                formHtml += `
+                    <div class="form-group">
+                        <label for="${col.column_name}">${col.column_name.charAt(0).toUpperCase() + col.column_name.slice(1)}:</label>
+                        ${getInputField(col)}
+                    </div>
+                `;
+            });
+            
+            formHtml += `
+                <div class="form-actions">
+                    <button type="button" class="btn-save" onclick="saveRecord('${tableName}', 'add')">💾 Guardar</button>
+                    <button type="button" class="btn-cancel" onclick="closeModal()">❌ Cancelar</button>
+                </div>
+            </form>`;
+            
+            modalBody.innerHTML = formHtml;
+            modal.style.display = 'block';
+        }
+
+        function showEditModal(tableName, recordId, fieldId) {
+            const modal = document.getElementById('crudModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            modalTitle.textContent = `Editar registro de ${tableName}`;
+            modalBody.innerHTML = '<div class="loading">Cargando datos...</div>';
+            modal.style.display = 'block';
+            
+            fetch(`index.php?api=get_record&tabla=${tableName}&id=${recordId}&campo_id=${fieldId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        let formHtml = '<form id="crudForm">';
+                        
+                        currentColumns.forEach(col => {
+                            const value = data.data[col.column_name] || '';
+                            
+                            formHtml += `
+                                <div class="form-group">
+                                    <label for="${col.column_name}">${col.column_name.charAt(0).toUpperCase() + col.column_name.slice(1)}:</label>
+                                    ${getInputField(col, value, col.column_name === fieldId)}
+                                </div>
+                            `;
+                        });
+                        
+                        formHtml += `
+                            <input type="hidden" id="recordId" value="${recordId}">
+                            <input type="hidden" id="fieldId" value="${fieldId}">
+                            <div class="form-actions">
+                                <button type="button" class="btn-save" onclick="saveRecord('${tableName}', 'edit')">💾 Actualizar</button>
+                                <button type="button" class="btn-cancel" onclick="closeModal()">❌ Cancelar</button>
+                            </div>
+                        </form>`;
+                        
+                        modalBody.innerHTML = formHtml;
+                    } else {
+                        modalBody.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    modalBody.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                });
+        }
+
+        function getInputField(column, value = '', isReadOnly = false) {
+            const name = column.column_name;
+            const type = column.data_type.toLowerCase();
+            const readOnlyAttr = isReadOnly ? 'readonly' : '';
+            const required = column.is_nullable === 'NO' && !isReadOnly ? 'required' : '';
+            
+            const escapedValue = String(value).replace(/"/g, '&quot;');
+            
+            if (type.includes('text') || type.includes('varchar') && value.length > 50) {
+                return `<textarea name="${name}" id="${name}" ${readOnlyAttr} ${required}>${escapedValue}</textarea>`;
+            } else if (type.includes('int') || type.includes('numeric') || type.includes('decimal') || type.includes('float')) {
+                return `<input type="number" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required} step="any">`;
+            } else if (type.includes('date')) {
+                let dateValue = '';
+                if (value && value !== '') {
+                    const date = new Date(value);
+                    if (!isNaN(date.getTime())) {
+                        dateValue = date.toISOString().split('T')[0];
+                    }
+                }
+                return `<input type="date" name="${name}" id="${name}" value="${dateValue}" ${readOnlyAttr} ${required}>`;
+            } else if (type.includes('timestamp') || type.includes('datetime')) {
+                let datetimeValue = '';
+                if (value && value !== '') {
+                    const date = new Date(value);
+                    if (!isNaN(date.getTime())) {
+                        datetimeValue = date.toISOString().slice(0, 16);
+                    }
+                }
+                return `<input type="datetime-local" name="${name}" id="${name}" value="${datetimeValue}" ${readOnlyAttr} ${required}>`;
+            } else if (type.includes('bool')) {
+                const checked = (value === true || value === 't' || value === '1' || value === 1) ? 'checked' : '';
+                const disabled = isReadOnly ? 'disabled' : '';
+                return `<input type="checkbox" name="${name}" id="${name}" ${checked} ${disabled}>`;
+            } else if (type.includes('email')) {
+                return `<input type="email" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required}>`;
             } else {
-                showMessage(data.error, 'error');
+                return `<input type="text" name="${name}" id="${name}" value="${escapedValue}" ${readOnlyAttr} ${required}>`;
             }
-        })
-        .catch(error => {
-            showMessage('Error de conexión: ' + error.message, 'error');
-        });
-    }
-}
+        }
 
-function closeModal() {
-    document.getElementById('crudModal').style.display = 'none';
-}
+        function saveRecord(tableName, action) {
+            const form = document.getElementById('crudForm');
+            const formData = new FormData();
+            
+            formData.append('api', action === 'add' ? 'insert_data' : 'update_data');
+            formData.append('tabla', tableName);
+            
+            const datos = {};
+            
+            currentColumns.forEach(col => {
+                const input = document.getElementById(col.column_name);
+                if (input) {
+                    if (input.type === 'checkbox') {
+                        datos[col.column_name] = input.checked ? '1' : '0';
+                    } else if (input.type === 'number') {
+                        if (input.value !== '') {
+                            datos[col.column_name] = input.value;
+                        }
+                    } else if (input.value !== '') {
+                        datos[col.column_name] = input.value;
+                    }
+                }
+            });
+            
+            if (Object.keys(datos).length === 0) {
+                showMessage('Debe llenar al menos un campo', 'error');
+                return;
+            }
+            
+            formData.append('datos', JSON.stringify(datos));
+            
+            if (action === 'edit') {
+                const recordId = document.getElementById('recordId');
+                const fieldId = document.getElementById('fieldId');
+                
+                if (!recordId || !fieldId) {
+                    showMessage('Error: No se encontraron los identificadores del registro', 'error');
+                    return;
+                }
+                
+                formData.append('id', recordId.value);
+                formData.append('campo_id', fieldId.value);
+            }
+            
+            const saveBtn = document.querySelector('.btn-save');
+            const originalText = saveBtn.textContent;
+            saveBtn.textContent = '⏳ Guardando...';
+            saveBtn.disabled = true;
+            
+            fetch('index.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('La respuesta del servidor no es JSON válida');
+                }
+                return response.json();
+            })
+            .then(data => {
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
+                
+                if (data.success) {
+                    closeModal();
+                    showMessage(data.message, 'success');
+                    // Recargar la página actual después de guardar
+                    loadTableData(tableName, currentPage);
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            })
+            .catch(error => {
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
+                
+                console.error('Error completo:', error);
+                showMessage('Error de conexión: ' + error.message, 'error');
+            });
+        }
 
-function showMessage(message, type) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = type === 'success' ? 'success-message' : 'error';
-    messageDiv.textContent = message;
-    
-    const tableContent = document.getElementById('tableContent');
-    tableContent.insertBefore(messageDiv, tableContent.firstChild);
-    
-    setTimeout(() => {
-        messageDiv.remove();
-    }, 5000);
-}
+        function deleteRecord(tableName, recordId, fieldId) {
+            if (confirm('¿Está seguro que desea eliminar este registro? Esta acción no se puede deshacer.')) {
+                const formData = new FormData();
+                formData.append('api', 'delete_data');
+                formData.append('tabla', tableName);
+                formData.append('id', recordId);
+                formData.append('campo_id', fieldId);
+                
+                fetch('index.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showMessage(data.message, 'success');
+                        // Recargar la página actual después de eliminar
+                        loadTableData(tableName, currentPage);
+                    } else {
+                        showMessage(data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    showMessage('Error de conexión: ' + error.message, 'error');
+                });
+            }
+        }
 
-function closeTable() {
-    document.getElementById('dataSection').style.display = 'none';
-}
+        function closeModal() {
+            document.getElementById('crudModal').style.display = 'none';
+        }
 
-// Cerrar modal al hacer clic fuera de él
-window.onclick = function(event) {
-    const modal = document.getElementById('crudModal');
-    if (event.target === modal) {
-        closeModal();
-    }
-}
-console.log('Usuario actual:', '<?php echo $_SESSION['usuario_nombre'] ?? 'No definido'; ?>');
-console.log('Rol actual:', '<?php echo $_SESSION['usuario_rol'] ?? 'No definido'; ?>');
+        function showMessage(message, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'success' ? 'success-message' : 'error';
+            messageDiv.textContent = message;
+            
+            const tableContent = document.getElementById('tableContent');
+            tableContent.insertBefore(messageDiv, tableContent.firstChild);
+            
+            setTimeout(() => {
+                messageDiv.remove();
+            }, 5000);
+        }
+
+        function closeTable() {
+            document.getElementById('dataSection').style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('crudModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        console.log('Usuario actual:', '<?php echo $_SESSION['usuario_nombre'] ?? 'No definido'; ?>');
+        console.log('Rol actual:', '<?php echo $_SESSION['usuario_rol'] ?? 'No definido'; ?>');
     </script>
 </body>
 </html>
